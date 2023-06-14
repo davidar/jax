@@ -100,6 +100,7 @@ from jax.experimental.jax2tf.tests.back_compat_testdata import tpu_Lu
 from jax.experimental.jax2tf.tests.back_compat_testdata import tpu_ApproxTopK
 from jax.experimental.jax2tf.tests.back_compat_testdata import tpu_Qr
 from jax.experimental.jax2tf.tests.back_compat_testdata import tpu_Sharding
+from jax.experimental.jax2tf.tests.back_compat_testdata import tpu_stablehlo_dynamic_reduce_window
 
 from jax.experimental import pjit
 from jax.experimental.shard_map import shard_map
@@ -190,6 +191,7 @@ class CompatTest(jtu.JaxTestCase):
 
   def run_one_test(self, func: Callable[..., jax.Array],
                    data: CompatTestData,
+                   polymorphic_shapes: Optional[Sequence[str]] = None,
                    rtol: Optional[float] = None,
                    atol: Optional[float] = None,
                    allow_additional_custom_call_targets: Sequence[str] = (),
@@ -200,6 +202,8 @@ class CompatTest(jtu.JaxTestCase):
     Args:
       func: the JAX function to serialize and run
       data: the test data
+      polymorphic_shapes: when using shape polymorphism, the specification for
+        each argument of `func`.
       rtol: relative tolerance for numerical comparisons
       atol: absolute tolerance for numerical comparisons
       check_results: invoked with the results obtained from running the
@@ -242,13 +246,14 @@ class CompatTest(jtu.JaxTestCase):
 
     if not use_tf_graph:
       # Use the native exporter, to make sure we get the proper serialization.
+      args_specs = jax_export.poly_specs(data.inputs, polymorphic_shapes)
       exported = jax_export.export(
           jax.jit(jax_func_to_export),
           lowering_platform=default_jax_backend(),
           disabled_checks=tuple(
             jax_export.DisabledSafetyCheck.custom_call(target)
             for target in allow_additional_custom_call_targets)
-      )(*(jax.ShapeDtypeStruct(a.shape, a.dtype) for a in data.inputs))
+      )(*args_specs)
 
       module_str = str(exported.mlir_module)
       serialized = exported.mlir_module_serialized
@@ -315,8 +320,10 @@ data_{datetime.date.today().strftime('%Y_%m_%d')} = dict(
                           atol=atol)
 
     logging.info("Running the serialized module")
-    res_from_serialized_run_now = self.run_serialized(data,
-                                                      use_tf_graph=use_tf_graph)
+    res_from_serialized_run_now = self.run_serialized(
+        data,
+        use_tf_graph=use_tf_graph,
+        polymorphic_shapes=polymorphic_shapes)
     logging.info("Result of serialized run is %s", res_from_serialized_run_now)
     if check_results is not None:
       check_results(res_from_serialized_run_now, data.expected_outputs,
@@ -327,10 +334,16 @@ data_{datetime.date.today().strftime('%Y_%m_%d')} = dict(
     self.assertListEqual(custom_call_targets, data.custom_call_targets)
 
   def run_serialized(self, data: CompatTestData,
-                     use_tf_graph=False):
+                     use_tf_graph: bool = False,
+                     polymorphic_shapes: Optional[Sequence[str]] = None):
+    args_specs = jax_export.poly_specs(data.inputs, polymorphic_shapes)
     def ndarray_to_aval(a: np.ndarray) -> core.ShapedArray:
       return core.ShapedArray(a.shape, a.dtype)
-    in_avals_tree = tree_util.tree_map(ndarray_to_aval, data.inputs)
+    in_avals_tree = tree_util.tree_map(ndarray_to_aval, args_specs)
+    # TODO: we ought to ensure that out_avals are polymorphic if need be. We
+    # could either save the in/out_avals (but we need to first implement that
+    # support in jax_export), or we can just re-use them from the current
+    # exported.
     out_avals_tree = tree_util.tree_map(ndarray_to_aval, data.expected_outputs)
     # in_tree must be for (args, kwargs)
     in_avals, in_tree = tree_util.tree_flatten((in_avals_tree, {}))
@@ -394,6 +407,7 @@ data_{datetime.date.today().strftime('%Y_%m_%d')} = dict(
       self.run_one_test(jnp.sin, platform_dummy_data)
 
   def test_custom_call_coverage(self):
+    """Tests that the back compat tests cover all the targets declared stable."""
     targets_to_cover = set(jax_export._CUSTOM_CALL_TARGETS_GUARANTEED_STABLE)
     # Add here all the testdatas that should cover the targets guaranteed
     # stable
@@ -404,7 +418,8 @@ data_{datetime.date.today().strftime('%Y_%m_%d')} = dict(
         tf_call_tf_function.data_2023_06_02,
         tpu_Eigh.data, tpu_Lu.data_2023_03_21, tpu_Qr.data_2023_03_17,
         tpu_Sharding.data_2023_03_16, tpu_ApproxTopK.data_2023_04_17,
-        tpu_ApproxTopK.data_2023_05_16]
+        tpu_ApproxTopK.data_2023_05_16,
+        tpu_stablehlo_dynamic_reduce_window.data_2023_06_16]
     covering_testdatas = itertools.chain(
         *[load_testdata_nested(d) for d in covering_testdatas])
     covered_targets = set()
@@ -606,6 +621,18 @@ data_{datetime.date.today().strftime('%Y_%m_%d')} = dict(
 
     data = load_testdata(tf_call_tf_function.data_2023_06_02)
     self.run_one_test(func, data, use_tf_graph=True)
+
+  def test_tpu_stablehlo_dynamic_reduce_window(self):
+    # stablehlo.dynamic_reduce_window is used temporarily on TPU for a
+    # reduce window with dynamic shapes.
+    # See https://github.com/openxla/stablehlo/issues/1258 for the long term.
+    def func(x):
+      return jnp.cumsum(x, axis=0)
+
+    data = load_testdata(tpu_stablehlo_dynamic_reduce_window.data_2023_06_16)
+    self.run_one_test(
+        func, data,
+        polymorphic_shapes=("b, ..."))
 
 
 if __name__ == "__main__":

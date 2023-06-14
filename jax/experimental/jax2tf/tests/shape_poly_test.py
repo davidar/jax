@@ -2765,14 +2765,14 @@ class ShapePolyPrimitivesTest(tf_test_util.JaxToTfTestCase):
         # https://github.com/openxla/stablehlo/issues/1255: need DynamicTopK
         raise unittest.SkipTest("native lowering with shape polymorphism not implemented for top_k")
 
-      if (jtu.device_under_test() in ["tpu", "gpu"] and
+      if (jtu.device_under_test() == "gpu" and
           harness.fullname in [
               "jnp.cumsum_reduce_axis=poly",
               "jnp.insert_insert=constant", "jnp.insert_insert=poly",
               "jnp.nonzero_size=constant", "jnp.nonzero_size=poly"]):
-        # https://github.com/openxla/stablehlo/issues/1258: need DynamicReduceWindowOp
+        # Need associative scan reductions on GPU
         raise unittest.SkipTest(
-            "native serialization with shape polymorphism not implemented for window_reductions")
+            "native serialization with shape polymorphism not implemented for window_reductions on GPU")
 
     # FOR GRAPH SERIALIZATION
     if not config.jax2tf_default_native_serialization:

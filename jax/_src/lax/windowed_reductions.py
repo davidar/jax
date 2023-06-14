@@ -33,6 +33,7 @@ from jax._src.lax import lax
 from jax._src.lax import convolution
 from jax._src.lax import slicing
 from jax._src.lib.mlir import ir
+from jax._src.lib.mlir.dialects import func
 from jax._src.lib.mlir.dialects import hlo
 from jax._src.numpy.ufuncs import logaddexp
 
@@ -469,19 +470,54 @@ def _reduce_window_lower(
   scalar_type = mlir.aval_to_ir_type(scalar_aval)
   if any(not core.is_constant_shape(s)
          for s in [window_dimensions, window_dilation, window_strides, base_dilation, *padding]):
-    raise NotImplementedError("ReduceWindowOp for dynamic shapes")
-  rw = hlo.ReduceWindowOp(
-      mlir.aval_to_ir_types(aval_out), [operand],
-      [mlir.full_like_aval(ctx, init_value(scalar_aval.dtype), scalar_aval)],
-      mlir.dense_int_elements(window_dimensions),
-      window_strides=mlir.dense_int_elements(window_strides),
-      base_dilations=mlir.dense_int_elements(base_dilation),
-      window_dilations=mlir.dense_int_elements(window_dilation),
-      padding=ir.DenseIntElementsAttr.get(np.asarray(padding, np.int64),
-                                          shape=(len(padding), 2)))
-  reducer = rw.regions[0].blocks.append(scalar_type, scalar_type)
-  with ir.InsertionPoint(reducer):
-    hlo.ReturnOp(reduce_op(*reducer.arguments))
+    # d_padding will be an array i32[N, 2] with pad_lo and pad_hi for each
+    # spatial dimension.
+    int2d = mlir.aval_to_ir_type(core.ShapedArray((1, 2), np.int32))
+    def prep_one_pad(pad_lo_hi: Tuple[core.DimSize, core.DimSize]):
+      pad1 = mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, pad_lo_hi))  # i32[2]
+      return hlo.ReshapeOp(int2d, pad1)
+    d_padding = hlo.ConcatenateOp(list(map(prep_one_pad, padding)),
+                                  mlir.i64_attr(0)).result
+    # Build the reducer
+    reducer_type = ir.FunctionType.get([scalar_type, scalar_type],
+                                       [scalar_type])
+    with ir.InsertionPoint.at_block_begin(ctx.module_context.module.body):
+      reducer = func.FuncOp(
+        "reduce_window_{}_{}_reducer".format(reduce_op.OPERATION_NAME,
+                                             scalar_aval.dtype),
+        reducer_type)
+    ctx.module_context.symbol_table.insert(reducer)
+    entry_block = reducer.add_entry_block()
+    with ir.InsertionPoint(entry_block):
+      hlo.ReturnOp(reduce_op(*entry_block.arguments))
+
+    rw = mlir.custom_call(
+      "stablehlo.dynamic_reduce_window",
+      [mlir.aval_to_ir_type(aval_out)],
+      [
+        operand,
+        mlir.full_like_aval(ctx, init_value(scalar_aval.dtype),
+                            scalar_aval),
+        mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, window_dimensions)),
+        mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, window_strides)),
+        mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, base_dilation)),
+        mlir.shape_tensor(mlir.eval_dynamic_shape(ctx, window_dilation)),
+        d_padding],
+       called_computations=[reducer.name.value],
+    )
+  else:  # Static shapes
+    rw = hlo.ReduceWindowOp(
+        mlir.aval_to_ir_types(aval_out), [operand],
+        [mlir.full_like_aval(ctx, init_value(scalar_aval.dtype), scalar_aval)],
+        mlir.dense_int_elements(window_dimensions),
+        window_strides=mlir.dense_int_elements(window_strides),
+        base_dilations=mlir.dense_int_elements(base_dilation),
+        window_dilations=mlir.dense_int_elements(window_dilation),
+        padding=ir.DenseIntElementsAttr.get(np.asarray(padding, np.int64),
+                                            shape=(len(padding), 2)))
+    reducer = rw.regions[0].blocks.append(scalar_type, scalar_type)
+    with ir.InsertionPoint(reducer):
+      hlo.ReturnOp(reduce_op(*reducer.arguments))
   return rw.results
 
 mlir.register_lowering(reduce_window_sum_p, partial(

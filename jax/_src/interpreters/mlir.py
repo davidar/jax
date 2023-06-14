@@ -1943,6 +1943,7 @@ def custom_call(
     backend_config: Optional[str] = None,
     has_side_effect: bool = False,
     result_shapes: Optional[Sequence[ir.Value]] = None,
+    called_computations: Sequence[str] = (),
     api_version: int = 2,
 ) -> ir.Operation:
   """Wraps a hlo.CustomCall.
@@ -1951,6 +1952,7 @@ def custom_call(
     result_shapes: tensors that represent the result shapes, to be used when
       the results have dynamic shapes. If not-None, its length must match the
       number of the results.
+    called_computations: the list of function names called by the custom call.
   """
   attributes = dict(
       call_target_name=ir.StringAttr.get(call_target_name),
@@ -1958,7 +1960,8 @@ def custom_call(
       backend_config=ir.StringAttr.get(
           "" if backend_config is None else backend_config),
       api_version=i32_attr(api_version),
-      called_computations=ir.ArrayAttr.get([]),
+      called_computations=ir.ArrayAttr.get([
+        ir.FlatSymbolRefAttr.get(name) for name in called_computations]),
   )
 
   if result_shapes is not None:

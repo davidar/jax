@@ -2745,9 +2745,9 @@ class ShapePolyPrimitivesTest(tf_test_util.JaxToTfTestCase):
           "vmap_fft:cpu", "fft:cpu",
           "householder_product:cpu", "householder_product:gpu",
           "vmap_geqrf:cpu", "vmap_geqrf:gpu",
-          "vmap_lu:cpu", "vmap_lu:gpu",
-          # custom_linear_solve uses lu
-          "vmap_custom_linear_solve:cpu", "vmap_custom_linear_solve:gpu",
+          "vmap_lu:gpu",
+          # custom_linear_solve works as long as lu works.
+          "vmap_custom_linear_solve:gpu",
           "vmap_qr:cpu", "vmap_qr:gpu",
           "vmap_svd:cpu", "vmap_svd:gpu",
       }

@@ -704,9 +704,8 @@ _CUSTOM_CALL_TARGETS_GUARANTEED_STABLE = {
     "cusolver_geqrf", "cusolver_orgqr",
     # qr and svd on TPU
     "Qr", "ProductOfElementaryHouseholderReflectors",
-    # TODO(atondwal, necula): add back_compat tests for lu on CPU/GPU
     # # lu on CPU
-    # "lapack_sgetrf" , "lapack_dgetrf" , "lapack_cgetrf" , "lapack_zgetrf",
+    "lapack_sgetrf",  "lapack_dgetrf", "lapack_cgetrf", "lapack_zgetrf",
     # # lu on GPU
     # "cublas_getrf_batched", "cusolver_getrf",
     # "hipblas_getrf_batched", "hipsolver_getrf",

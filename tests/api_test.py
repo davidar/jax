@@ -1074,18 +1074,6 @@ class CPPJitTest(jtu.BufferDonationTestCase):
       _ = jitted_f(1, 2)
     self.assertEqual(count[0], 1)
 
-  @jtu.ignore_warning(category=DeprecationWarning)
-  def test_jit_lower_compile_compiler_ir(self):
-    # TODO(frostig): remove (deprecated)
-    f = self.jit(lambda x: x + 4).lower(1.).compile()
-    self.assertIsNotNone(f.compiler_ir())
-
-  @jtu.ignore_warning(category=DeprecationWarning)
-  def test_jit_lower_trivial_compile_compiler_ir(self):
-    # TODO(frostig): remove (deprecated)
-    f = self.jit(lambda x: x).lower(1.).compile()
-    self.assertIsNotNone(f.compiler_ir())
-
   def test_jit_lower_compile_as_text(self):
     f = self.jit(lambda x: x).lower(1.).compile()
     g = self.jit(lambda x: x + 4).lower(1.).compile()

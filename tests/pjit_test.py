@@ -1004,21 +1004,6 @@ class PJitTest(jtu.BufferDonationTestCase):
     self.assertIn("mhlo.num_replicas = 1", hlo)
     self.assertIn("mhlo.num_partitions = 2", hlo)
 
-  @jtu.ignore_warning(category=DeprecationWarning)
-  @jtu.with_mesh([('x', 2), ('y', 2)])
-  def testLowerCompileCompilerIR(self):
-    # TODO(frostig): remove (deprecated)
-    @partial(pjit,
-             in_shardings=P(('x', 'y'),),
-             out_shardings=P(('x', 'y'),))
-    def f(x, y):
-      return x @ y
-
-    shape = (8, 8)
-    x = jnp.arange(math.prod(shape)).reshape(shape)
-    f = f.lower(x, x + 1).compile()
-    self.assertIsNotNone(f.compiler_ir())
-
   @jtu.with_mesh([('x', 2), ('y', 2)])
   def testLowerCompileAsText(self):
     @partial(pjit,
